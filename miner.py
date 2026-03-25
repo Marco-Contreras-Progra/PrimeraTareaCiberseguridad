@@ -3,8 +3,8 @@ import time
 import subprocess
 import os
 import shutil
-import ast  # Para analizar código Python (Abstract Syntax Tree)
-import re   # Para buscar patrones en código Java (Expresiones Regulares)
+import ast  
+import re   
 
 GITHUB_TOKEN = 'token'  # REEMPLAZA ESTO CON TU PROPIO TOKEN
 HEADERS = {
@@ -28,9 +28,7 @@ def extraer_nombres_python(ruta_archivo):
     try:
         with open(ruta_archivo, 'r', encoding='utf-8') as archivo:
             contenido = archivo.read()
-            # Convertimos el texto en un árbol de sintaxis que Python entiende
             arbol = ast.parse(contenido)
-            # Recorremos cada "nodo" o elemento del código
             for nodo in ast.walk(arbol):
                 if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     nombres.append(nodo.name)
@@ -40,19 +38,39 @@ def extraer_nombres_python(ruta_archivo):
 
 def extraer_nombres_java(ruta_archivo):
     nombres = []
-    # Usamos una expresión regular para buscar el patrón típico de un método en Java
-    # Busca visibilidad (public/private...), tipo de retorno, nombre_metodo y un paréntesis '('
     patron_java = re.compile(r'(?:public|protected|private)\s+(?:static\s+)?[\w\<\>\[\]\?]+\s+(\w+)\s*\(')
-    
     try:
         with open(ruta_archivo, 'r', encoding='utf-8') as archivo:
             contenido = archivo.read()
-            # findall nos devuelve una lista con todas las palabras que coinciden con el grupo (\w+)
             nombres = patron_java.findall(contenido)
     except Exception as e:
         pass
     return nombres
-# -----------------------------------------------------
+
+#Función para limpiar y separar palabras
+def procesar_y_limpiar_nombres(lista_nombres):
+    palabras_finales = []
+    for nombre in lista_nombres:
+        # 1. Detectar camelCase: insertamos un guión bajo entre una minúscula y una mayúscula
+        # Ejemplo: "retainAll" se convierte en "retain_All"
+        nombre_modificado = re.sub(r'([a-z])([A-Z])', r'\1_\2', nombre)
+        
+        # 2. Ahora que todo tiene un formato similar a snake_case, separamos por guiones bajos
+        # "make_response" -> ["make", "response"]
+        # "retain_All" -> ["retain", "All"]
+        palabras = nombre_modificado.split('_')
+        
+        # 3. Limpiamos símbolos extraños y convertimos a minúsculas
+        for p in palabras:
+            # Eliminamos cualquier cosa que no sea una letra de la A a la Z
+            p_limpia = re.sub(r'[^a-zA-Z]', '', p).lower()
+            
+            # Solo guardamos la palabra si no quedó vacía y tiene más de 1 letra (opcional, para evitar variables basura como 'i', 'x')
+            if len(p_limpia) > 1: 
+                palabras_finales.append(p_limpia)
+                
+    return palabras_finales
+# ---------------------------------------------------------------
 
 def obtener_repositorios_por_pagina(pagina):
     url = f"https://api.github.com/search/repositories?q=language:python+language:java&sort=stars&order=desc&per_page=10&page={pagina}"
@@ -91,29 +109,22 @@ def iniciar_miner():
             ruta_destino = os.path.join(CARPETA_TEMPORAL, nombre_carpeta_seguro)
 
             try:
-                subprocess.run(
-                    ["git", "clone", "--depth", "1", clone_url, ruta_destino],
-                    check=True, 
-                    capture_output=True 
-                )
+                subprocess.run(["git", "clone", "--depth", "1", clone_url, ruta_destino], check=True, capture_output=True)
                 
                 archivos_a_procesar = encontrar_archivos_objetivo(ruta_destino)
-                print(f"   -> Se encontraron {len(archivos_a_procesar)} archivos (.py y .java). Extrayendo nombres...")
                 
                 nombres_extraidos = []
                 for archivo in archivos_a_procesar:
                     if archivo.endswith('.py'):
-                        nombres = extraer_nombres_python(archivo)
-                        nombres_extraidos.extend(nombres)
+                        nombres_extraidos.extend(extraer_nombres_python(archivo))
                     elif archivo.endswith('.java'):
-                        nombres = extraer_nombres_java(archivo)
-                        nombres_extraidos.extend(nombres)
+                        nombres_extraidos.extend(extraer_nombres_java(archivo))
                 
-                # Imprimimos una muestra para verificar que funciona
+               
                 if nombres_extraidos:
-                    print(f"   -> ¡Éxito! Se extrajeron {len(nombres_extraidos)} funciones/métodos en total.")
-                    print(f"   -> Muestra de lo encontrado: {nombres_extraidos[:5]}...")
-                # ------------------------------------
+                    palabras_procesadas = procesar_y_limpiar_nombres(nombres_extraidos)
+                    print(f"   -> Se extrajeron y limpiaron {len(palabras_procesadas)} palabras en total.")
+                    print(f"   -> Muestra de palabras listas para enviar: {palabras_procesadas[:10]}...")
                 
             except subprocess.CalledProcessError as e:
                 print(f"   -> Error al clonar {nombre_repo}: {e}")
