@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador del Miner - Top Palabras</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            text-align: center;
+            padding: 20px;
+        }
+        #chart-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .bar {
+            fill: #4caf50;
+            transition: fill 0.3s ease;
+        }
+        .bar:hover {
+            fill: #81c784;
+        }
+        .axis-text {
+            fill: #ffffff;
+            font-size: 14px;
+        }
+        .axis-line {
+            stroke: #ffffff;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Top 15 Palabras Más Usadas en Funciones (GitHub)</h1>
+    <p>Actualizándose en tiempo real desde el Miner...</p>
+    
+    <div id="chart-container">
+        <div id="chart"></div>
+    </div>
+
+    <script>
+        // --- Configuración del gráfico D3 ---
+        const margin = {top: 20, right: 30, bottom: 40, left: 120};
+        const width = 800 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        // Creamos el lienzo (SVG)
+        const svg = d3.select("#chart")
+          .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+          .append("g")
+            .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Ejes
+        const x = d3.scaleLinear().range([0, width]);
+        const y = d3.scaleBand().range([0, height]).padding(0.2);
+        
+        const xAxis = svg.append("g").attr("transform", `translate(0,${height})`);
+        const yAxis = svg.append("g");
+
+        // --- Lógica del Consumidor ---
+        async function consumirDatos() {
+            try {
+                // 1. Leemos el archivo JSONL generado por el Miner
+                // Añadimos un timestamp a la URL para evitar que el navegador guarde el archivo en caché
+                const response = await fetch(`datos_compartidos/palabras.jsonl?t=${new Date().getTime()}`);
+                if (!response.ok) return;
+
+                const texto = await response.text();
+                
+                // 2. Procesamos el JSONL
+                const lineas = texto.trim().split('\n');
+                const conteoPalabras = {};
+
+                lineas.forEach(linea => {
+                    if (linea) {
+                        try {
+                            const obj = JSON.parse(linea);
+                            const palabra = obj.palabra;
+                            conteoPalabras[palabra] = (conteoPalabras[palabra] || 0) + 1;
+                        } catch (e) {
+                            // Ignorar líneas malformadas
+                        }
+                    }
+                });
+
+                // 3. Ordenamos para sacar el Top 15
+                // Convertimos el diccionario a un array de objetos [{palabra: "get", cantidad: 50}, ...]
+                let datosArreglo = Object.keys(conteoPalabras).map(key => ({
+                    palabra: key,
+                    cantidad: conteoPalabras[key]
+                }));
+
+                // Ordenamos de mayor a menor y cortamos los primeros 15
+                datosArreglo.sort((a, b) => b.cantidad - a.cantidad);
+                datosArreglo = datosArreglo.slice(0, 15);
+
+                // 4. Actualizamos el gráfico de D3.js
+                actualizarGrafico(datosArreglo);
+
+            } catch (error) {
+                console.log("Esperando datos del Miner...");
+            }
+        }
+
+        function actualizarGrafico(datos) {
+            // Actualizamos los dominios de los ejes con los nuevos datos
+            x.domain([0, d3.max(datos, d => d.cantidad)]);
+            y.domain(datos.map(d => d.palabra));
+
+            // Dibujamos el eje X e Y con estilos blancos
+            xAxis.transition().duration(500).call(d3.axisBottom(x))
+                .selectAll("text").attr("class", "axis-text");
+            xAxis.selectAll("path, line").attr("class", "axis-line");
+
+            yAxis.transition().duration(500).call(d3.axisLeft(y))
+                .selectAll("text").attr("class", "axis-text");
+            yAxis.selectAll("path, line").attr("class", "axis-line");
+
+            // Vinculamos los datos a las barras (rectángulos)
+            const barras = svg.selectAll("rect").data(datos, d => d.palabra);
+
+            // Quitamos las barras de palabras que salieron del Top 15
+            barras.exit().remove();
+
+            // Actualizamos las barras existentes
+            barras.transition().duration(500)
+                .attr("width", d => x(d.cantidad))
+                .attr("y", d => y(d.palabra))
+                .attr("height", y.bandwidth());
+
+            // Agregamos las nuevas barras que entraron al Top 15
+            barras.enter()
+                .append("rect")
+                .attr("class", "bar")
+                .attr("x", x(0))
+                .attr("y", d => y(d.palabra))
+                .attr("height", y.bandwidth())
+                .transition().duration(500)
+                .attr("width", d => x(d.cantidad));
+        }
+
+        // --- Inicio del ciclo ---
+        // Ejecutamos la función inmediatamente y luego cada 3 segundos
+        consumirDatos();
+        setInterval(consumirDatos, 3000);
+
+    </script>
+</body>
+</html>
