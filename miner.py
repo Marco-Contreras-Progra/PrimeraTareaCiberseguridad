@@ -3,16 +3,20 @@ import time
 import subprocess
 import os
 import shutil
-import ast  
-import re   
+import ast
+import re
+import json # Para guardar en formato JSON
 
-GITHUB_TOKEN = 'token'  # REEMPLAZA ESTO CON TU PROPIO TOKEN
+GITHUB_TOKEN = ''  # REEMPLAZA ESTO CON TU PROPIO TOKEN
 HEADERS = {
     'Authorization': f'token {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
 }
 
 CARPETA_TEMPORAL = "./repos_temporales" 
+# Carpeta donde guardaremos el JSON que leerá el Visualizer
+CARPETA_COMPARTIDA = "./datos_compartidos" 
+ARCHIVO_JSONL = os.path.join(CARPETA_COMPARTIDA, "palabras.jsonl")
 
 def encontrar_archivos_objetivo(ruta_base):
     archivos_encontrados = []
@@ -47,30 +51,30 @@ def extraer_nombres_java(ruta_archivo):
         pass
     return nombres
 
-#Función para limpiar y separar palabras
 def procesar_y_limpiar_nombres(lista_nombres):
     palabras_finales = []
     for nombre in lista_nombres:
-        # 1. Detectar camelCase: insertamos un guión bajo entre una minúscula y una mayúscula
-        # Ejemplo: "retainAll" se convierte en "retain_All"
         nombre_modificado = re.sub(r'([a-z])([A-Z])', r'\1_\2', nombre)
-        
-        # 2. Ahora que todo tiene un formato similar a snake_case, separamos por guiones bajos
-        # "make_response" -> ["make", "response"]
-        # "retain_All" -> ["retain", "All"]
         palabras = nombre_modificado.split('_')
-        
-        # 3. Limpiamos símbolos extraños y convertimos a minúsculas
         for p in palabras:
-            # Eliminamos cualquier cosa que no sea una letra de la A a la Z
             p_limpia = re.sub(r'[^a-zA-Z]', '', p).lower()
-            
-            # Solo guardamos la palabra si no quedó vacía y tiene más de 1 letra (opcional, para evitar variables basura como 'i', 'x')
             if len(p_limpia) > 1: 
                 palabras_finales.append(p_limpia)
-                
     return palabras_finales
-# ---------------------------------------------------------------
+
+# Función para guardar en el archivo JSONL 
+def guardar_en_json(palabras, lenguaje, repo_nombre):
+    """Guarda cada palabra como un objeto JSON independiente en una nueva línea."""
+    with open(ARCHIVO_JSONL, 'a', encoding='utf-8') as f:
+        for palabra in palabras:
+            datos = {
+                "palabra": palabra,
+                "lenguaje": lenguaje,
+                "repositorio": repo_nombre,
+                "timestamp": time.time() # Útil para que el visualizer sepa qué tan nuevo es el dato
+            }
+            # json.dumps convierte el diccionario a un texto con formato JSON
+            f.write(json.dumps(datos) + "\n")
 
 def obtener_repositorios_por_pagina(pagina):
     url = f"https://api.github.com/search/repositories?q=language:python+language:java&sort=stars&order=desc&per_page=10&page={pagina}"
@@ -85,7 +89,12 @@ def iniciar_miner():
     print("Iniciando el Miner de GitHub...")
     pagina_actual = 1
     os.makedirs(CARPETA_TEMPORAL, exist_ok=True) 
+    os.makedirs(CARPETA_COMPARTIDA, exist_ok=True) # --- NUEVO: PASO 4
     
+    # Limpiamos el archivo JSON de ejecuciones anteriores
+    if os.path.exists(ARCHIVO_JSONL):
+        os.remove(ARCHIVO_JSONL)
+
     while True:
         print(f"\n--- Consultando página {pagina_actual} ---")
         repos = obtener_repositorios_por_pagina(pagina_actual)
@@ -113,18 +122,28 @@ def iniciar_miner():
                 
                 archivos_a_procesar = encontrar_archivos_objetivo(ruta_destino)
                 
-                nombres_extraidos = []
+                # Separamos la lógica para saber si es Python o Java
+                nombres_py = []
+                nombres_java = []
+                
                 for archivo in archivos_a_procesar:
                     if archivo.endswith('.py'):
-                        nombres_extraidos.extend(extraer_nombres_python(archivo))
+                        nombres_py.extend(extraer_nombres_python(archivo))
                     elif archivo.endswith('.java'):
-                        nombres_extraidos.extend(extraer_nombres_java(archivo))
+                        nombres_java.extend(extraer_nombres_java(archivo))
                 
-               
-                if nombres_extraidos:
-                    palabras_procesadas = procesar_y_limpiar_nombres(nombres_extraidos)
-                    print(f"   -> Se extrajeron y limpiaron {len(palabras_procesadas)} palabras en total.")
-                    print(f"   -> Muestra de palabras listas para enviar: {palabras_procesadas[:10]}...")
+                # Procesamos y guardamos Python
+                if nombres_py:
+                    palabras_py = procesar_y_limpiar_nombres(nombres_py)
+                    guardar_en_json(palabras_py, "python", nombre_repo)
+                    
+                # Procesamos y guardamos Java
+                if nombres_java:
+                    palabras_java = procesar_y_limpiar_nombres(nombres_java)
+                    guardar_en_json(palabras_java, "java", nombre_repo)
+
+                total_palabras = len(nombres_py) + len(nombres_java)
+                print(f"   -> Se extrajeron y guardaron {total_palabras} palabras en {ARCHIVO_JSONL}.")
                 
             except subprocess.CalledProcessError as e:
                 print(f"   -> Error al clonar {nombre_repo}: {e}")
