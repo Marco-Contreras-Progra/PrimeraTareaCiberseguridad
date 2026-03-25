@@ -3,33 +3,58 @@ import time
 import subprocess
 import os
 import shutil
+import ast  # Para analizar código Python (Abstract Syntax Tree)
+import re   # Para buscar patrones en código Java (Expresiones Regulares)
 
-GITHUB_TOKEN = 'TOKEN'  # REEMPLAZA ESTO CON TU PROPIO TOKEN
+GITHUB_TOKEN = 'token'  # REEMPLAZA ESTO CON TU PROPIO TOKEN
 HEADERS = {
     'Authorization': f'token {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
 }
 
-# --- NUEVO: Definimos la carpeta temporal donde se clonarán los repos ---
 CARPETA_TEMPORAL = "./repos_temporales" 
 
-# --- NUEVO: Función para buscar archivos ---
 def encontrar_archivos_objetivo(ruta_base):
-    """Recorre todas las carpetas y devuelve una lista con las rutas de los archivos .py y .java"""
     archivos_encontrados = []
-    # os.walk recorre el directorio principal y todos sus subdirectorios automáticamente
     for raiz, directorios, archivos in os.walk(ruta_base):
         for archivo in archivos:
             if archivo.endswith('.py') or archivo.endswith('.java'):
-                # Unimos la ruta de la carpeta con el nombre del archivo
                 ruta_completa = os.path.join(raiz, archivo)
                 archivos_encontrados.append(ruta_completa)
-    
     return archivos_encontrados
-# -----------------------------------------
+
+def extraer_nombres_python(ruta_archivo):
+    nombres = []
+    try:
+        with open(ruta_archivo, 'r', encoding='utf-8') as archivo:
+            contenido = archivo.read()
+            # Convertimos el texto en un árbol de sintaxis que Python entiende
+            arbol = ast.parse(contenido)
+            # Recorremos cada "nodo" o elemento del código
+            for nodo in ast.walk(arbol):
+                if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nombres.append(nodo.name)
+    except Exception as e:
+        pass
+    return nombres
+
+def extraer_nombres_java(ruta_archivo):
+    nombres = []
+    # Usamos una expresión regular para buscar el patrón típico de un método en Java
+    # Busca visibilidad (public/private...), tipo de retorno, nombre_metodo y un paréntesis '('
+    patron_java = re.compile(r'(?:public|protected|private)\s+(?:static\s+)?[\w\<\>\[\]\?]+\s+(\w+)\s*\(')
+    
+    try:
+        with open(ruta_archivo, 'r', encoding='utf-8') as archivo:
+            contenido = archivo.read()
+            # findall nos devuelve una lista con todas las palabras que coinciden con el grupo (\w+)
+            nombres = patron_java.findall(contenido)
+    except Exception as e:
+        pass
+    return nombres
+# -----------------------------------------------------
 
 def obtener_repositorios_por_pagina(pagina):
-    # ... (tu código se mantiene igual aquí) ...
     url = f"https://api.github.com/search/repositories?q=language:python+language:java&sort=stars&order=desc&per_page=10&page={pagina}"
     response = requests.get(url, headers=HEADERS)
     if response.status_code == 200:
@@ -41,8 +66,6 @@ def obtener_repositorios_por_pagina(pagina):
 def iniciar_miner():
     print("Iniciando el Miner de GitHub...")
     pagina_actual = 1
-    
-    # Creamos la carpeta temporal si no existe
     os.makedirs(CARPETA_TEMPORAL, exist_ok=True) 
     
     while True:
@@ -60,7 +83,7 @@ def iniciar_miner():
         for repo in repos:
             nombre_repo = repo['full_name']
             estrellas = repo['stargazers_count']
-            clone_url = repo['clone_url']  # --- NUEVO: Extraemos la URL para clonar ---
+            clone_url = repo['clone_url']
             
             print(f"Miner analizando: {nombre_repo} (estrellas: {estrellas})")
 
@@ -68,19 +91,28 @@ def iniciar_miner():
             ruta_destino = os.path.join(CARPETA_TEMPORAL, nombre_carpeta_seguro)
 
             try:
-                print(f"   -> Clonando repositorio...")
                 subprocess.run(
                     ["git", "clone", "--depth", "1", clone_url, ruta_destino],
                     check=True, 
                     capture_output=True 
                 )
-                print(f"   -> ¡Clonado exitosamente en {ruta_destino}!")
                 
-                # --- NUEVO: PASO 1 INTEGRADO AQUÍ ---
                 archivos_a_procesar = encontrar_archivos_objetivo(ruta_destino)
-                print(f"   -> Se encontraron {len(archivos_a_procesar)} archivos (.py y .java) para analizar.")
+                print(f"   -> Se encontraron {len(archivos_a_procesar)} archivos (.py y .java). Extrayendo nombres...")
                 
-                # En el próximo paso, iteraremos sobre esta lista "archivos_a_procesar"
+                nombres_extraidos = []
+                for archivo in archivos_a_procesar:
+                    if archivo.endswith('.py'):
+                        nombres = extraer_nombres_python(archivo)
+                        nombres_extraidos.extend(nombres)
+                    elif archivo.endswith('.java'):
+                        nombres = extraer_nombres_java(archivo)
+                        nombres_extraidos.extend(nombres)
+                
+                # Imprimimos una muestra para verificar que funciona
+                if nombres_extraidos:
+                    print(f"   -> ¡Éxito! Se extrajeron {len(nombres_extraidos)} funciones/métodos en total.")
+                    print(f"   -> Muestra de lo encontrado: {nombres_extraidos[:5]}...")
                 # ------------------------------------
                 
             except subprocess.CalledProcessError as e:
@@ -88,7 +120,6 @@ def iniciar_miner():
             
             finally:
                 if os.path.exists(ruta_destino):
-                    print(f"   -> Borrando archivos temporales...")
                     shutil.rmtree(ruta_destino, ignore_errors=True)
             
         pagina_actual += 1
