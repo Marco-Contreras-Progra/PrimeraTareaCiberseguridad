@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # 1. Contenedor del Productor (Python)
+  miner:
+    build:
+      context: .
+      dockerfile: Dockerfile.miner
+    # Conectamos el volumen compartido a la carpeta que usa el miner
+    volumes:
+      - datos_compartidos:/app/datos_compartidos
+
+  # 2. Contenedor del Consumidor (Servidor Web Nginx)
+  visualizer:
+    image: nginx:alpine
+    ports:
+      - "8000:80" # Expone el puerto 8000 en tu computadora
+    volumes:
+      # Inyectamos tu index.html al servidor web
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      # Conectamos el MISMO volumen compartido para que el HTML pueda leer el JSONL
+      - datos_compartidos:/usr/share/nginx/html/datos_compartidos:ro
+
+# Declaramos el volumen que ambos van a compartir
+volumes:
+  datos_compartidos:

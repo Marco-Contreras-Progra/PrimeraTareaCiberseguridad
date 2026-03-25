@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+# Directorio de trabajo dentro del contenedor
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Instalamos la librería requests
+RUN pip install requests
+
+# Copiamos nuestro script al contenedor
+COPY miner.py .
+
+# Comando para iniciar el miner
+CMD ["python", "-u", "miner.py"]
